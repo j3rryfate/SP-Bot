@@ -43,7 +43,7 @@ async def start(event):
 @CLIENT.on(events.NewMessage(pattern=r'/search (.+)'))
 async def search(event):
     query = event.pattern_match.group(1)
-    from spotify import search_single  # Adjusted to work with spotify.py in root
+    from spotify import search_single  # Should work with spotify.py in spotify directory after __init__.py update
     songs = search_single(query)
     if songs:
         message = "Search Results:\n"
