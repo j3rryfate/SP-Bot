@@ -50,6 +50,8 @@ pip install -r requirements.txt
 1. Start the bot by sending `/start` command.
 2. Send a Spotify or song name to download music.
 3. Search for music by sending song, album, or artist names.
+4. status - User can use this command for user status
+5. subscribe - Using for This Bot
 
 ## Contributing
 
