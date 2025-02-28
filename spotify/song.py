@@ -268,7 +268,7 @@ class Song:
             cover = None
             album_name = "Unknown Album"
 
-        # Send album summary with cover
+        # Send album summary with cover (separate message and file)
         album_message = f'''
 💿 Album: `{album_name}`
 📝 Tracks: `{len(album.track_list)}`
@@ -276,10 +276,12 @@ class Song:
 [IMAGE]({album_cover_url or ""})
 {album.external_urls['spotify'] if hasattr(album, 'external_urls') else ""}
         '''
-        await event.respond(album_message, file=cover if cover else None, buttons=[
+        sent_message = await event.respond(album_message, buttons=[
             [Button.url("🎵 Listen on Spotify", album.external_urls['spotify'] if hasattr(album, 'external_urls') else "")],
             [Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")]
         ])
+        if cover:
+            await sent_message.reply(file=cover)
 
         # Download and upload tracks
         for index, track_id in enumerate(album.track_list):
@@ -334,7 +336,7 @@ class Song:
             cover = None
             playlist_name = "Unknown Playlist"
 
-        # Send playlist summary with cover
+        # Send playlist summary with cover (separate message and file)
         playlist_message = f'''
 🎧 Playlist: `{playlist_name}`
 📝 Tracks: `{len(tracks)}`
@@ -342,10 +344,12 @@ class Song:
 [IMAGE]({playlist_cover_url or ""})
 {playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else ""}
         '''
-        await event.respond(playlist_message, file=cover if cover else None, buttons=[
+        sent_message = await event.respond(playlist_message, buttons=[
             [Button.url("🎵 Listen on Spotify", playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else "")],
             [Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")]
         ])
+        if cover:
+            await sent_message.reply(file=cover)
 
         # Download and upload tracks
         for index, item in enumerate(tracks):
