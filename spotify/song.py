@@ -4,7 +4,7 @@ import time  # Added to fix NameError
 
 import requests
 from telethon.tl import types
-from telethon.tl.types import PeerUser
+from telethon.tl.types import PeerUser, PeerChannel
 from youtube_search import YoutubeSearch
 import yt_dlp
 import eyed3.id3
@@ -150,10 +150,9 @@ class Song:
 💿 Album : `{self.album_name}`
 📅 Release Date : `{self.release_date}`
 
-[IMAGE]({self.album_cover})
 {self.uri}   
         '''
-
+        # Remove cover photo from template to avoid duplication
         buttons = [[Button.inline(f'📩Download Track!', data=f"download_song:{self.id}")],
                    [Button.inline(f'🖼️Download Track Image!', data=f"download_song_image:{self.id}")],
                    [Button.inline(f'👀View Track Album!', data=f"album:{self.album_id}")],
@@ -162,7 +161,7 @@ class Song:
                    [Button.url(f'🎵Listen on Spotify', self.spotify_link)],
                    ]
 
-        return message, self.album_cover, buttons
+        return message, None, buttons  # Return None for cover to avoid duplication
 
     async def artist_buttons_telethon_templates(self):
         message = f"{self.track_name} track Artist's"
@@ -199,7 +198,6 @@ class Song:
             message_id = song_db.song_id_in_group
         else:
             song = Song(song_id)
-            # Remove NOT_IN_DB message
             await processing.edit(DOWNLOADING)
             yt_link = song.yt_link()
             if yt_link is None:
@@ -211,24 +209,30 @@ class Song:
             await processing.edit(UPLOADING)
 
             upload_file = await CLIENT.upload_file(file_path)
+            template = await song.song_telethon_template()
             new_message = await CLIENT.send_file(
                 DB_CHANNEL_ID,
-                caption=BOT_ID,
                 file=upload_file,
+                caption=template[0],
                 supports_streaming=True,
                 attributes=(
-                    types.DocumentAttributeAudio(title=song.track_name, duration=song.duration_to_seconds,
-                                                performer=song.artist_name),),
+                    types.DocumentAttributeAudio(
+                        title=song.track_name,
+                        duration=song.duration_to_seconds,
+                        performer=song.artist_name
+                    ),
+                ),
                 progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
             )
             song.save_db(event.sender_id, new_message.id)
             message_id = new_message.id
 
-        # Forward the message
+        # Forward the message without additional cover photo
+        from_peer = await CLIENT.get_input_entity(DB_CHANNEL_ID)  # Use get_input_entity for channel ID
         await CLIENT.forward_messages(
             entity=event.chat_id,
             messages=message_id,
-            from_peer=PeerUser(int(DB_CHANNEL_ID))
+            from_peer=from_peer
         )
         await processing.delete()
 
