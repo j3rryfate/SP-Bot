@@ -1,5 +1,6 @@
 from telegram import BOT_TOKEN, CLIENT
 from telethon import events
+from telethon.tl.custom import Button  # Added to fix Button NameError
 from models import session, Subscription, User
 from decouple import config
 import datetime
@@ -61,6 +62,28 @@ async def handle_spotify_link(event):
     print(f'[TELEGRAM] Handling Spotify link for song_id: {song_id}')
     from spotify.song import Song
     await Song.upload_on_telegram(event, song_id)
+
+@CLIENT.on(events.NewMessage(pattern=r'https?://open\.spotify\.com/album/([a-zA-Z0-9]+)\??.*'))
+async def handle_spotify_album(event):
+    user_id = event.sender_id
+    if not await check_subscription(user_id):
+        await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
+        return
+    album_id = event.pattern_match.group(1)
+    print(f'[TELEGRAM] Handling Spotify album link for album_id: {album_id}')
+    from spotify.song import Song
+    await Song.upload_album_on_telegram(event, album_id)
+
+@CLIENT.on(events.NewMessage(pattern=r'https?://open\.spotify\.com/playlist/([a-zA-Z0-9]+)\??.*'))
+async def handle_spotify_playlist(event):
+    user_id = event.sender_id
+    if not await check_subscription(user_id):
+        await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
+        return
+    playlist_id = event.pattern_match.group(1)
+    print(f'[TELEGRAM] Handling Spotify playlist link for playlist_id: {playlist_id}')
+    from spotify.song import Song
+    await Song.upload_playlist_on_telegram(event, playlist_id)
 
 @CLIENT.on(events.NewMessage(pattern='/subscribe'))
 async def subscribe(event):
