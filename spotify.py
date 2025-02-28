@@ -1,5 +1,6 @@
+# spotify/spotify.py
 from spotify import SPOTIFY
-from spotify.song import Song
+from .song import Song
 
 def album(link):
     results = SPOTIFY.album_tracks(link)
