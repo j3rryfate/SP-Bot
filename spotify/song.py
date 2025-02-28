@@ -152,7 +152,7 @@ class Song:
 
 {self.uri}   
         '''
-        # Remove cover photo from template to avoid duplication
+        # Remove [IMAGE] tag to avoid duplication with album/playlist cover
         buttons = [[Button.inline(f'📩Download Track!', data=f"download_song:{self.id}")],
                    [Button.inline(f'🖼️Download Track Image!', data=f"download_song_image:{self.id}")],
                    [Button.inline(f'👀View Track Album!', data=f"album:{self.album_id}")],
