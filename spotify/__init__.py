@@ -7,3 +7,6 @@ SPOTIFY = spotipy.Spotify(
                                                                        client_secret=config("SPOTIPY_CLIENT_SECRET")))
 
 GENIUS = lyricsgenius.Genius(config("GENIUS_ACCESS_TOKEN"))
+
+# Export search_single from spotify.py
+from .spotify import search_single
