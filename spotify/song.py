@@ -217,10 +217,11 @@ class Song:
         await processing.edit(UPLOADING)
 
         upload_file = await CLIENT.upload_file(file_path)
+        template = await song.song_telethon_template()  # Await the coroutine
         new_message = await CLIENT.send_file(
             DB_CHANNEL_ID,
             file=upload_file,
-            caption=await song.song_telethon_template()[0],  # Use template for caption
+            caption=template[0],  # Use the first element of the tuple
             supports_streaming=True,
             attributes=(
                 types.DocumentAttributeAudio(
@@ -241,9 +242,9 @@ class Song:
             from_peer=PeerUser(int(DB_CHANNEL_ID))
         )
         await forwarded_message.reply(
-            await song.song_telethon_template()[0],  # Message
+            template[0],  # Message
             file=await CLIENT.upload_file(await song.download_song_cover()),  # Cover image
-            buttons=await song.song_telethon_template()[2]  # Buttons
+            buttons=template[2]  # Buttons
         )
         await processing.delete()
 
@@ -280,12 +281,12 @@ class Song:
         buttons = []
         if valid_spotify_url:
             buttons.append([Button.url("🎵 Listen on Spotify", valid_spotify_url)])
-        buttons.append([Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")])
+        # No download button as per request
         sent_message = await event.respond(album_message, buttons=buttons)
         if cover:
             await sent_message.reply(file=cover)
 
-        # Download and upload tracks
+        # Download and upload tracks automatically
         for index, track_id in enumerate(album.track_list):
             song = Song(f"https://open.spotify.com/track/{track_id}")
             await processing.edit(f"Downloading track {index + 1}/{len(album.track_list)}")
@@ -297,10 +298,11 @@ class Song:
             await processing.edit(f"Uploading track {index + 1}/{len(album.track_list)}")
 
             upload_file = await CLIENT.upload_file(file_path)
+            template = await song.song_telethon_template()  # Await the coroutine
             new_message = await CLIENT.send_file(
                 DB_CHANNEL_ID,
                 file=upload_file,
-                caption=await song.song_telethon_template()[0],
+                caption=template[0],  # Use the first element of the tuple
                 supports_streaming=True,
                 attributes=(
                     types.DocumentAttributeAudio(
@@ -313,6 +315,14 @@ class Song:
                 progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
             )
             song.save_db(event.sender_id, new_message.id)
+            message_id = new_message.id
+
+            # Forward the track to the user
+            await CLIENT.forward_messages(
+                entity=event.chat_id,
+                messages=message_id,
+                from_peer=PeerUser(int(DB_CHANNEL_ID))
+            )
 
         await processing.delete()
 
@@ -350,12 +360,12 @@ class Song:
         buttons = []
         if valid_spotify_url:
             buttons.append([Button.url("🎵 Listen on Spotify", valid_spotify_url)])
-        buttons.append([Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")])
+        # No download button as per request
         sent_message = await event.respond(playlist_message, buttons=buttons)
         if cover:
             await sent_message.reply(file=cover)
 
-        # Download and upload tracks
+        # Download and upload tracks automatically
         for index, item in enumerate(tracks):
             track_id = item['track']['id']
             song = Song(f"https://open.spotify.com/track/{track_id}")
@@ -368,10 +378,11 @@ class Song:
             await processing.edit(f"Uploading track {index + 1}/{len(tracks)}")
 
             upload_file = await CLIENT.upload_file(file_path)
+            template = await song.song_telethon_template()  # Await the coroutine
             new_message = await CLIENT.send_file(
                 DB_CHANNEL_ID,
                 file=upload_file,
-                caption=await song.song_telethon_template()[0],
+                caption=template[0],  # Use the first element of the tuple
                 supports_streaming=True,
                 attributes=(
                     types.DocumentAttributeAudio(
@@ -384,5 +395,13 @@ class Song:
                 progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
             )
             song.save_db(event.sender_id, new_message.id)
+            message_id = new_message.id
+
+            # Forward the track to the user
+            await CLIENT.forward_messages(
+                entity=event.chat_id,
+                messages=message_id,
+                from_peer=PeerUser(int(DB_CHANNEL_ID))
+            )
 
         await processing.delete()
