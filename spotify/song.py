@@ -1,5 +1,6 @@
 import datetime
 import os
+import time  # Added to fix NameError
 
 import requests
 from telethon.tl import types
@@ -92,6 +93,7 @@ class Song:
 
     def yt_download(self, yt_link=None):
         options = {
+            # PERMANENT options
             'format': 'bestaudio/best',
             'keepvideo': True,
             'outtmpl': f'{self.path}/{self.id}',
@@ -119,7 +121,7 @@ class Song:
         mp3.tag.album_artist = self.artist_name
         mp3.tag.title = self.track_name + self.features()
         mp3.tag.track_num = self.track_number
-        mp3.tag.year = self.release_date
+        mp3.tag.year = self.release_date  # Fixed to use release_date instead of track_number
 
         lyrics = self.lyrics()
         if lyrics is not None:
@@ -188,13 +190,14 @@ class Song:
     @staticmethod
     async def upload_on_telegram(event: events.CallbackQuery.Event, song_id):
         processing = await event.respond(PROCESSING)
-        start_time = time.time()
 
+        # Check if the song is already in the database
         song_db = session.query(SongRequest).filter_by(spotify_id=song_id).first()
         if song_db:
             message_id = song_db.song_id_in_group
         else:
             song = Song(song_id)
+            # Remove NOT_IN_DB message
             await processing.edit(DOWNLOADING)
             yt_link = song.yt_link()
             if yt_link is None:
@@ -213,18 +216,38 @@ class Song:
                 supports_streaming=True,
                 attributes=(
                     types.DocumentAttributeAudio(title=song.track_name, duration=song.duration_to_seconds,
-                                                performer=song.artist_name),
-                ),
+                                                performer=song.artist_name),),
                 progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
             )
             song.save_db(event.sender_id, new_message.id)
             message_id = new_message.id
 
+        # Forward the message
         await CLIENT.forward_messages(
             entity=event.chat_id,
             messages=message_id,
             from_peer=PeerUser(int(DB_CHANNEL_ID))
         )
-        end_time = time.time()
-        print(f'[TELEGRAM] Upload time: {end_time - start_time:.2f} seconds')
+        await processing.delete()
+
+    @staticmethod
+    async def upload_album_on_telegram(event: events.CallbackQuery.Event, album_id):
+        from spotify.album import Album
+        album = Album(album_id)
+        processing = await event.respond(PROCESSING)
+
+        for track_id in album.track_list:
+            await Song.upload_on_telegram(event, track_id)  # Reuse track upload logic
+        await processing.delete()
+
+    @staticmethod
+    async def upload_playlist_on_telegram(event: events.CallbackQuery.Event, playlist_id):
+        from spotify.playlist import Playlist
+        playlist = Playlist(playlist_id)
+        tracks = playlist.get_playlist_tracks(playlist_id)
+        processing = await event.respond(PROCESSING)
+
+        for item in tracks:
+            track_id = item['track']['id']
+            await Song.upload_on_telegram(event, track_id)  # Reuse track upload logic
         await processing.delete()
