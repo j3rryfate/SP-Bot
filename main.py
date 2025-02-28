@@ -6,7 +6,7 @@ import datetime
 import pytz
 from sqlalchemy.exc import SQLAlchemyError
 import re  # Added for URL parsing
-import time  # Ensured to be present
+import time  # Added to fix NameError
 from consts import PROCESSING  # Already added
 from spotify.song import Song  # Already added
 
@@ -43,7 +43,7 @@ async def start(event):
 @CLIENT.on(events.NewMessage(pattern=r'/search (.+)'))
 async def search(event):
     query = event.pattern_match.group(1)
-    from spotify import search_single
+    from spotify import search_single  # Adjusted to work with spotify.py in root
     songs = search_single(query)
     if songs:
         message = "Search Results:\n"
