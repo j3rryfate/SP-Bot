@@ -253,15 +253,20 @@ class Song:
         album = Album(album_id)
         processing = await event.respond(PROCESSING)
 
-        # Send album cover and metadata first
-        album_cover_url = album.images[0]['url'] if album.images else None
-        if album_cover_url:
+        # Get cover photo from the first track's album
+        if album.track_list:
+            first_track_id = album.track_list[0]
+            first_song = Song(f"https://open.spotify.com/track/{first_track_id}")
+            album_cover_url = first_song.album_cover
             response = requests.get(album_cover_url)
             cover_file = f'covers/album_{album_id}.png'
             with open(cover_file, 'wb') as f:
                 f.write(response.content)
             cover = await CLIENT.upload_file(cover_file)
+        else:
+            cover = None
 
+        # Send album summary with cover
         album_message = f'''
 💿 Album: `{album.name}`
 📝 Tracks: `{len(album.track_list)}`
@@ -269,7 +274,7 @@ class Song:
 [IMAGE]({album_cover_url or ""})
 {album.external_urls['spotify']}
         '''
-        await event.respond(album_message, file=cover if album_cover_url else None, buttons=[
+        await event.respond(album_message, file=cover if cover else None, buttons=[
             [Button.url("🎵 Listen on Spotify", album.external_urls['spotify'])],
             [Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")]
         ])
@@ -311,15 +316,20 @@ class Song:
         tracks = playlist.get_playlist_tracks(playlist_id)
         processing = await event.respond(PROCESSING)
 
-        # Send playlist cover and metadata first
-        playlist_cover_url = playlist.images[0]['url'] if playlist.images else None
-        if playlist_cover_url:
+        # Get cover photo from the first track's album
+        if tracks:
+            first_track_id = tracks[0]['track']['id']
+            first_song = Song(f"https://open.spotify.com/track/{first_track_id}")
+            playlist_cover_url = first_song.album_cover
             response = requests.get(playlist_cover_url)
             cover_file = f'covers/playlist_{playlist_id}.png'
             with open(cover_file, 'wb') as f:
                 f.write(response.content)
             cover = await CLIENT.upload_file(cover_file)
+        else:
+            cover = None
 
+        # Send playlist summary with cover
         playlist_message = f'''
 🎧 Playlist: `{playlist.name}`
 📝 Tracks: `{len(tracks)}`
@@ -327,7 +337,7 @@ class Song:
 [IMAGE]({playlist_cover_url or ""})
 {playlist.external_urls['spotify']}
         '''
-        await event.respond(playlist_message, file=cover if playlist_cover_url else None, buttons=[
+        await event.respond(playlist_message, file=cover if cover else None, buttons=[
             [Button.url("🎵 Listen on Spotify", playlist.external_urls['spotify'])],
             [Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")]
         ])
