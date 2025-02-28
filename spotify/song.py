@@ -253,11 +253,12 @@ class Song:
         album = Album(album_id)
         processing = await event.respond(PROCESSING)
 
-        # Get cover photo from the first track's album
+        # Get cover photo and name from the first track
         if album.track_list:
             first_track_id = album.track_list[0]
             first_song = Song(f"https://open.spotify.com/track/{first_track_id}")
             album_cover_url = first_song.album_cover
+            album_name = first_song.album_name  # Use album name from first track
             response = requests.get(album_cover_url)
             cover_file = f'covers/album_{album_id}.png'
             with open(cover_file, 'wb') as f:
@@ -265,17 +266,18 @@ class Song:
             cover = await CLIENT.upload_file(cover_file)
         else:
             cover = None
+            album_name = "Unknown Album"
 
         # Send album summary with cover
         album_message = f'''
-💿 Album: `{album.name}`
+💿 Album: `{album_name}`
 📝 Tracks: `{len(album.track_list)}`
-📅 Release Date: `{album.release_date[:4] if album.release_date else "N/A"}`
+📅 Release Date: `{first_song.release_date if album.track_list else "N/A"}`
 [IMAGE]({album_cover_url or ""})
-{album.external_urls['spotify']}
+{album.external_urls['spotify'] if hasattr(album, 'external_urls') else ""}
         '''
         await event.respond(album_message, file=cover if cover else None, buttons=[
-            [Button.url("🎵 Listen on Spotify", album.external_urls['spotify'])],
+            [Button.url("🎵 Listen on Spotify", album.external_urls['spotify'] if hasattr(album, 'external_urls') else "")],
             [Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")]
         ])
 
@@ -298,6 +300,7 @@ class Song:
                 supports_streaming=True,
                 attributes=(
                     types.DocumentAttributeAudio(
+                        release_date=song.release_date,
                         title=song.track_name,
                         duration=song.duration_to_seconds,
                         performer=song.artist_name
@@ -316,11 +319,12 @@ class Song:
         tracks = playlist.get_playlist_tracks(playlist_id)
         processing = await event.respond(PROCESSING)
 
-        # Get cover photo from the first track's album
+        # Get cover photo and name from the first track
         if tracks:
             first_track_id = tracks[0]['track']['id']
             first_song = Song(f"https://open.spotify.com/track/{first_track_id}")
             playlist_cover_url = first_song.album_cover
+            playlist_name = tracks[0]['track']['album']['name']  # Use album name from first track as proxy
             response = requests.get(playlist_cover_url)
             cover_file = f'covers/playlist_{playlist_id}.png'
             with open(cover_file, 'wb') as f:
@@ -328,17 +332,18 @@ class Song:
             cover = await CLIENT.upload_file(cover_file)
         else:
             cover = None
+            playlist_name = "Unknown Playlist"
 
         # Send playlist summary with cover
         playlist_message = f'''
-🎧 Playlist: `{playlist.name}`
+🎧 Playlist: `{playlist_name}`
 📝 Tracks: `{len(tracks)}`
 📅 Created: `{playlist.created_at[:10] if playlist.created_at else "N/A"}`
 [IMAGE]({playlist_cover_url or ""})
-{playlist.external_urls['spotify']}
+{playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else ""}
         '''
         await event.respond(playlist_message, file=cover if cover else None, buttons=[
-            [Button.url("🎵 Listen on Spotify", playlist.external_urls['spotify'])],
+            [Button.url("🎵 Listen on Spotify", playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else "")],
             [Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")]
         ])
 
@@ -362,6 +367,7 @@ class Song:
                 supports_streaming=True,
                 attributes=(
                     types.DocumentAttributeAudio(
+                        release_date=song.release_date,
                         title=song.track_name,
                         duration=song.duration_to_seconds,
                         performer=song.artist_name
