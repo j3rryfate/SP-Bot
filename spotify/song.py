@@ -338,7 +338,7 @@ class Song:
         playlist_message = f'''
 🎧 Playlist: `{playlist_name}`
 📝 Tracks: `{len(tracks)}`
-📅 Created: `{playlist.created_at[:10] if playlist.created_at else "N/A"}`
+📅 Release Date: `{first_song.release_date if tracks else "N/A"}`  # Use release date from first track as proxy
 [IMAGE]({playlist_cover_url or ""})
 {playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else ""}
         '''
