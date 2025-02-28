@@ -1,293 +1,230 @@
-from telegram import BOT_TOKEN, CLIENT
-from telethon import events
-from telethon.tl.custom import Button  # Added to fix Button NameError
-from models import session, Subscription, User
-from decouple import config
 import datetime
-import pytz
-from sqlalchemy.exc import SQLAlchemyError
-import re  # Added for URL parsing
-import time  # Ensured to be present
-from consts import PROCESSING  # Already added
-from spotify.song import Song  # Already added
+import os
 
-ADMIN_ID = int(config('ADMIN_ID'))
+import requests
+from telethon.tl import types
+from telethon.tl.types import PeerUser
+from youtube_search import YoutubeSearch
+import yt_dlp
+import eyed3.id3
+import eyed3
+from telethon import Button, events
 
-async def check_subscription(user_id):
-    try:
-        user = session.query(User).filter_by(telegram_id=user_id).first()
-        if not user:
-            return False
-        if user.is_banned:
-            return False
-        sub = session.query(Subscription).filter_by(user_id=user.id, approved=1).first()
-        if not sub:
-            return False
-        utc = pytz.UTC
-        end_date = utc.localize(sub.end_date) if sub.end_date else datetime.datetime.min.replace(tzinfo=utc)
-        if end_date < datetime.datetime.now(datetime.UTC):
-            return False
-        return True
-    except SQLAlchemyError as e:
-        session.rollback()
-        print(f"Database error in check_subscription: {e}")
-        return False
+from consts import DOWNLOADING, UPLOADING, PROCESSING, ALREADY_IN_DB, NO_LYRICS_FOUND, SONG_NOT_FOUND
+from models import session, User, SongRequest
+from spotify import SPOTIFY, GENIUS
+from telegram import DB_CHANNEL_ID, CLIENT, BOT_ID
 
-@CLIENT.on(events.NewMessage(pattern='/start'))
-async def start(event):
-    user_id = event.sender_id
-    if await check_subscription(user_id):
-        await event.respond("Welcome back! Your subscription is active. Use /search <song_name> or send a Spotify link to download.")
-    else:
-        await event.respond("Welcome! Use /subscribe to get access or /search <song_name> to try without subscription.")
+if not os.path.exists('covers'):
+    os.makedirs('covers')
 
-@CLIENT.on(events.NewMessage(pattern=r'/search (.+)'))
-async def search(event):
-    query = event.pattern_match.group(1)
-    from spotify import search_single
-    songs = search_single(query)
-    if songs:
-        message = "Search Results:\n"
-        buttons = []
-        for i, song in enumerate(songs[:5]):
-            buttons.append([Button.inline(f"{song.track_name} - {song.artist_name}", data=f"song:{song.id}")])
-        await event.respond(message, buttons=buttons)
-    else:
-        await event.respond("No songs found.")
 
-@CLIENT.on(events.NewMessage(pattern=r'https?://open\.spotify\.com/track/([a-zA-Z0-9]+)\??.*'))
-async def handle_spotify_link(event):
-    user_id = event.sender_id
-    try:
-        if not await check_subscription(user_id):
-            await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
-            return
-        song_id = event.pattern_match.group(1)
-        print(f'[TELEGRAM] Handling Spotify track link for song_id: {song_id}')
-        start_time = time.time()
-        await Song.upload_on_telegram(event, song_id)
-        end_time = time.time()
-        print(f'[TELEGRAM] Upload time for track: {end_time - start_time:.2f} seconds')
-    except Exception as e:
-        print(f'[ERROR] Exception in handle_spotify_link: {e}')
+class Song:
+    def __init__(self, link):
+        self.spotify = SPOTIFY.track(link)
+        self.id = self.spotify['id']
+        self.spotify_link = self.spotify['external_urls']['spotify']
+        self.track_name = self.spotify['name']
+        self.artists_list = self.spotify['artists']
+        self.artist_name = self.artists_list[0]['name']
+        self.artists = self.spotify['artists']
+        self.track_number = self.spotify['track_number']
+        self.album = self.spotify['album']
+        self.album_id = self.album['id']
+        self.album_name = self.album['name']
+        self.release_date = int(self.spotify['album']['release_date'][:4])
+        self.duration = int(self.spotify['duration_ms'])
+        self.duration_to_seconds = int(self.duration / 1000)
+        self.album_cover = self.spotify['album']['images'][0]['url']
+        self.path = f'songs'
+        self.file = f'{self.path}/{self.id}.mp3'
+        self.uri = self.spotify['uri']
 
-@CLIENT.on(events.NewMessage(pattern=r'https?://open\.spotify\.com/album/([a-zA-Z0-9]+)\??.*'))
-async def handle_spotify_album(event):
-    user_id = event.sender_id
-    try:
-        if not await check_subscription(user_id):
-            await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
-            return
-        album_id = event.pattern_match.group(1)
-        print(f'[TELEGRAM] Handling Spotify album link for album_id: {album_id}')
-        from spotify.album import Album
-        album = Album(album_id)
-        processing = await event.respond(PROCESSING)
-        for track_id in album.track_list:
-            await Song.upload_on_telegram(event, track_id)
-        await processing.delete()
-    except Exception as e:
-        print(f'[ERROR] Exception in handle_spotify_album: {e}')
+    def features(self):
+        if len(self.artists) > 1:
+            features = "(Ft."
+            for artistPlace in range(0, len(self.artists)):
+                try:
+                    if artistPlace < len(self.artists) - 2:
+                        artistft = self.artists[artistPlace + 1]['name'] + ", "
+                    else:
+                        artistft = self.artists[artistPlace + 1]['name'] + ")"
+                    features += artistft
+                except:
+                    pass
+        else:
+            features = ""
+        return features
 
-@CLIENT.on(events.NewMessage(pattern=r'https?://open\.spotify\.com/playlist/([a-zA-Z0-9]+)\??.*'))
-async def handle_spotify_playlist(event):
-    user_id = event.sender_id
-    try:
-        if not await check_subscription(user_id):
-            await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
-            return
-        playlist_id = event.pattern_match.group(1)
-        print(f'[TELEGRAM] Handling Spotify playlist link for playlist_id: {playlist_id}')
-        from spotify.playlist import Playlist
-        playlist = Playlist(playlist_id)
-        tracks = Playlist.get_playlist_tracks(playlist_id)
-        processing = await event.respond(PROCESSING)
-        for item in tracks:
-            track_id = item['track']['id']
-            await Song.upload_on_telegram(event, track_id)
-        await processing.delete()
-    except Exception as e:
-        print(f'[ERROR] Exception in handle_spotify_playlist: {e}')
+    def convert_time_duration(self):
+        target_datetime_ms = self.duration
+        base_datetime = datetime.datetime(1900, 1, 1)
+        delta = datetime.timedelta(0, 0, 0, target_datetime_ms)
 
-@CLIENT.on(events.NewMessage(pattern='/subscribe'))
-async def subscribe(event):
-    user_id = event.sender_id
-    try:
+        return base_datetime + delta
+
+    def download_song_cover(self):
+        response = requests.get(self.album_cover)
+        image_file_name = f'covers/{self.id}.png'
+        image = open(image_file_name, "wb")
+        image.write(response.content)
+        image.close()
+        return image_file_name
+
+    def yt_link(self):
+        results = list(YoutubeSearch(str(self.track_name + " " + self.artist_name)).to_dict())
+        time_duration = self.convert_time_duration()
+        yt_url = None
+
+        for yt in results:
+            yt_time = yt["duration"]
+            yt_time = datetime.datetime.strptime(yt_time, '%M:%S')
+            difference = abs((yt_time - time_duration).total_seconds())
+
+            if difference <= 3:
+                yt_url = yt['url_suffix']
+                break
+        if yt_url is None:
+            return None
+
+        yt_link = str("https://www.youtube.com/" + yt_url)
+        return yt_link
+
+    def yt_download(self, yt_link=None):
+        options = {
+            # PERMANENT options
+            'format': 'bestaudio/best',
+            'keepvideo': True,
+            'outtmpl': f'{self.path}/{self.id}',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '320'
+            }],
+        }
+        if yt_link is None:
+            yt_link = self.yt_link()
+        with yt_dlp.YoutubeDL(options) as mp3:
+            mp3.download([yt_link])
+
+    def lyrics(self):
+        try:
+            return GENIUS.search_song(self.track_name, self.artist_name).lyrics
+        except:
+            return None
+
+    def song_meta_data(self):
+        mp3 = eyed3.load(self.file)
+        mp3.tag.artist_name = self.artist_name
+        mp3.tag.album_name = self.album_name
+        mp3.tag.album_artist = self.artist_name
+        mp3.tag.title = self.track_name + self.features()
+        mp3.tag.track_num = self.track_number
+        mp3.tag.year = self.release_date  # Fixed to use release_date instead of track_number
+
+        lyrics = self.lyrics()
+        if lyrics is not None:
+            mp3.tag.lyrics.set(lyrics)
+
+        mp3.tag.images.set(3, open(self.download_song_cover(), 'rb').read(), 'image/png')
+        mp3.tag.save()
+
+    def download(self, yt_link=None):
+        if os.path.exists(self.file):
+            print(f'[SPOTIFY] Song Already Downloaded: {self.track_name} by {self.artist_name}')
+            return self.file
+        print(f'[YOUTUBE] Downloading {self.track_name} by {self.artist_name}...')
+        self.yt_download(yt_link=yt_link)
+        print(f'[SPOTIFY] Song Metadata: {self.track_name} by {self.artist_name}')
+        self.song_meta_data()
+        print(f'[SPOTIFY] Song Downloaded: {self.track_name} by {self.artist_name}')
+        return self.file
+
+    async def song_telethon_template(self):
+        message = f'''
+🎧 Title :`{self.track_name}`
+🎤 Artist : `{self.artist_name}{self.features()}`
+💿 Album : `{self.album_name}`
+📅 Release Date : `{self.release_date}`
+
+[IMAGE]({self.album_cover})
+{self.uri}   
+        '''
+
+        buttons = [[Button.inline(f'📩Download Track!', data=f"download_song:{self.id}")],
+                   [Button.inline(f'🖼️Download Track Image!', data=f"download_song_image:{self.id}")],
+                   [Button.inline(f'👀View Track Album!', data=f"album:{self.album_id}")],
+                   [Button.inline(f'🧑‍🎨View Track Artists!', data=f"track_artist:{self.id}")],
+                   [Button.inline(f'📃View Track Lyrics!', data=f"track_lyrics:{self.id}")],
+                   [Button.url(f'🎵Listen on Spotify', self.spotify_link)],
+                   ]
+
+        return message, self.album_cover, buttons
+
+    async def artist_buttons_telethon_templates(self):
+        message = f"{self.track_name} track Artist's"
+        buttons = [[Button.inline(artist['name'], data=f"artist:{artist['id']}")]
+                   for artist in self.artists_list]
+        return message, buttons
+
+    def save_db(self, user_id: int, song_id_in_group: int):
         user = session.query(User).filter_by(telegram_id=user_id).first()
         if not user:
             user = User(telegram_id=user_id)
             session.add(user)
             session.commit()
-        if user.is_banned:
-            await event.respond("You are banned from using this bot.")
-            return
-        sub = session.query(Subscription).filter_by(user_id=user.id, approved=0).first()
-        if not sub:
-            sub = Subscription(user_id=user.id)
-            session.add(sub)
-            session.commit()
-        await event.respond("Please send a payment screenshot to the admin for verification.")
-    except SQLAlchemyError as e:
-        session.rollback()
-        print(f"Database error in subscribe: {e}")
-        await event.respond("Something went wrong. Please try again later.")
-
-@CLIENT.on(events.NewMessage(func=lambda e: e.photo and e.is_private))
-async def handle_payment_screenshot(event):
-    user_id = event.sender_id
-    try:
-        await CLIENT.forward_messages(ADMIN_ID, event.message)
-        await CLIENT.send_message(ADMIN_ID, f"Payment screenshot from User ID: {user_id}")
-        await event.respond("Payment screenshot forwarded to admin. Please wait for approval.")
-    except Exception as e:
-        print(f"Error in handle_payment_screenshot: {e}")
-        await event.respond("Failed to forward screenshot. Please try again.")
-
-@CLIENT.on(events.NewMessage(pattern=r'/approve_sub (\d+) (\d+)'))
-async def approve_subscription(event):
-    if event.sender_id != ADMIN_ID:
-        await event.respond("You are not authorized to use this command.")
-        return
-    user_telegram_id, days = map(int, event.raw_text.split()[1:])
-    try:
-        user = session.query(User).filter_by(telegram_id=user_telegram_id).first()
-        if not user:
-            await event.respond("User not found.")
-            return
-        sub = session.query(Subscription).filter_by(user_id=user.id, approved=0).first()
-        if not sub:
-            sub = Subscription(user_id=user.id)
-        sub.start_date = datetime.datetime.now(datetime.UTC)
-        sub.end_date = sub.start_date + datetime.timedelta(days=days)
-        sub.approved = 1
+        session.add(SongRequest(
+            spotify_id=self.id,
+            user_id=user.id,
+            song_id_in_group=song_id_in_group,
+            group_id=DB_CHANNEL_ID
+        ))
         session.commit()
-        expiry_date = sub.end_date.strftime("%Y-%m-%d")
-        await event.respond(f"Subscription approved for user {user_telegram_id} for {days} days.")
-        await CLIENT.send_message(
-            user_telegram_id, 
-            f"Your subscription has been approved! You can use the bot until {expiry_date}."
+
+    @staticmethod
+    async def progress_callback(processing, sent_bytes, total):
+        percentage = sent_bytes / total * 100
+        await processing.edit(f"Uploading: {percentage:.2f}%")
+
+    @staticmethod
+    async def upload_on_telegram(event: events.CallbackQuery.Event, song_id):
+        processing = await event.respond(PROCESSING)
+
+        # Check if the song is already in the database
+        song_db = session.query(SongRequest).filter_by(spotify_id=song_id).first()
+        if song_db:
+            message_id = song_db.song_id_in_group
+        else:
+            song = Song(song_id)
+            # Remove NOT_IN_DB message
+            await processing.edit(DOWNLOADING)
+            yt_link = song.yt_link()
+            if yt_link is None:
+                print(f'[YOUTUBE] song not found: {song.uri}')
+                await processing.delete()
+                await event.respond(f"{song.track_name}\n{SONG_NOT_FOUND}")
+                return
+            file_path = song.download(yt_link=yt_link)
+            await processing.edit(UPLOADING)
+
+            upload_file = await CLIENT.upload_file(file_path)
+            new_message = await CLIENT.send_file(
+                DB_CHANNEL_ID,
+                caption=BOT_ID,
+                file=upload_file,
+                supports_streaming=True,
+                attributes=(
+                    types.DocumentAttributeAudio(title=song.track_name, duration=song.duration_to_seconds,
+                                                performer=song.artist_name),),
+                progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
+            )
+            song.save_db(event.sender_id, new_message.id)
+            message_id = new_message.id
+
+        # Forward the message
+        await CLIENT.forward_messages(
+            entity=event.chat_id,
+            messages=message_id,
+            from_peer=PeerUser(int(DB_CHANNEL_ID))
         )
-    except SQLAlchemyError as e:
-        session.rollback()
-        print(f"Database error in approve_subscription: {e}")
-        await event.respond("Failed to approve subscription. Please try again.")
-
-@CLIENT.on(events.NewMessage(pattern=r'/ban (\d+)'))
-async def ban_user(event):
-    if event.sender_id != ADMIN_ID:
-        await event.respond("You are not authorized to use this command.")
-        return
-    user_telegram_id = int(event.raw_text.split()[1])
-    try:
-        user = session.query(User).filter_by(telegram_id=user_telegram_id).first()
-        if not user:
-            await event.respond("User not found.")
-            return
-        user.is_banned = True
-        session.commit()
-        await event.respond(f"User {user_telegram_id} has been banned.")
-        await CLIENT.send_message(user_telegram_id, "You have been banned from using this bot.")
-    except SQLAlchemyError as e:
-        session.rollback()
-        print(f"Database error in ban_user: {e}")
-        await event.respond("Failed to ban user. Please try again.")
-
-@CLIENT.on(events.NewMessage(pattern=r'/unban (\d+)'))
-async def unban_user(event):
-    if event.sender_id != ADMIN_ID:
-        await event.respond("You are not authorized to use this command.")
-        return
-    user_telegram_id = int(event.raw_text.split()[1])
-    try:
-        user = session.query(User).filter_by(telegram_id=user_telegram_id).first()
-        if not user:
-            await event.respond("User not found.")
-            return
-        if not user.is_banned:
-            await event.respond(f"User {user_telegram_id} is not banned.")
-            return
-        user.is_banned = False
-        session.commit()
-        await event.respond(f"User {user_telegram_id} has been unbanned.")
-        await CLIENT.send_message(user_telegram_id, "You have been unbanned and can now use the bot again.")
-    except SQLAlchemyError as e:
-        session.rollback()
-        print(f"Database error in unban_user: {e}")
-        await event.respond("Failed to unban user. Please try again.")
-
-@CLIENT.on(events.NewMessage(pattern='/status'))
-async def check_status(event):
-    user_id = event.sender_id
-    try:
-        user = session.query(User).filter_by(telegram_id=user_id).first()
-        if not user:
-            await event.respond("You are not registered yet. Use /subscribe to start.")
-            return
-        if user.is_banned:
-            await event.respond("You are banned from using this bot.")
-            return
-        sub = session.query(Subscription).filter_by(user_id=user.id, approved=1).first()
-        if not sub:
-            await event.respond("You don't have an active subscription. Use /subscribe to get access.")
-            return
-        utc = pytz.UTC
-        end_date = utc.localize(sub.end_date) if sub.end_date else datetime.datetime.min.replace(tzinfo=utc)
-        if end_date < datetime.datetime.now(datetime.UTC):
-            await event.respond("You don't have an active subscription. Use /subscribe to get access.")
-            return
-        expiry_date = sub.end_date.strftime("%Y-%m-%d")
-        await event.respond(f"Your subscription is active until {expiry_date}.")
-    except SQLAlchemyError as e:
-        session.rollback()
-        print(f"Database error in check_status: {e}")
-        await event.respond("Something went wrong while checking your status. Please try again later.")
-
-@CLIENT.on(events.CallbackQuery(pattern=r'download_song:.*'))
-async def handle_download(event: events.CallbackQuery.Event):
-    if not await check_subscription(event.sender_id):
-        await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
-        return
-    data = event.data.decode('utf-8')
-    song_id = data[14:]  # Extract song_id after "download_song:"
-    print(f'[TELEGRAM] Download song callback query: {song_id}')
-    start_time = time.time()
-    await Song.upload_on_telegram(event, song_id)
-    end_time = time.time()
-    print(f'[TELEGRAM] Upload time for track: {end_time - start_time:.2f} seconds')
-
-@CLIENT.on(events.CallbackQuery(pattern=r'download_album_songs:.*'))
-async def handle_download_album(event: events.CallbackQuery.Event):
-    if not await check_subscription(event.sender_id):
-        await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
-        return
-    data = event.data.decode('utf-8')
-    album_id = data[20:]  # Extract album_id after "download_album_songs:"
-    print(f'[TELEGRAM] Download album callback query: {album_id}')
-    from spotify.album import Album
-    album = Album(album_id)
-    processing = await event.respond(PROCESSING)
-    for track_id in album.track_list:
-        await Song.upload_on_telegram(event, track_id)
-    await processing.delete()
-
-@CLIENT.on(events.CallbackQuery(pattern=r'download_playlist_songs:.*'))
-async def handle_download_playlist(event: events.CallbackQuery.Event):
-    if not await check_subscription(event.sender_id):
-        await event.respond("သင့်မှာ active subscription မရှိပါ။ /subscribe ကို သုံးပါ။")
-        return
-    data = event.data.decode('utf-8')
-    playlist_id = data[23:]  # Extract playlist_id after "download_playlist_songs:"
-    print(f'[TELEGRAM] Download playlist callback query: {playlist_id}')
-    from spotify.playlist import Playlist
-    playlist = Playlist(playlist_id)
-    tracks = Playlist.get_playlist_tracks(playlist_id)
-    processing = await event.respond(PROCESSING)
-    for item in tracks:
-        track_id = item['track']['id']
-        await Song.upload_on_telegram(event, track_id)
-    await processing.delete()
-
-if __name__ == '__main__':
-    print('[BOT] Starting...')
-    CLIENT.start(bot_token=BOT_TOKEN)
-    CLIENT.run_until_disconnected()
+        await processing.delete()
