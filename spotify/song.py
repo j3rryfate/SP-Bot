@@ -275,13 +275,8 @@ class Song:
 📝 Tracks: `{len(album.track_list)}`
 📅 Release Date: `{first_song.release_date if album.track_list else "N/A"}`
 [IMAGE]({album_cover_url or ""})
-{album.external_urls['spotify'] if hasattr(album, 'external_urls') else ""}
         '''
-        valid_spotify_url = album.external_urls['spotify'] if (hasattr(album, 'external_urls') and album.external_urls['spotify'].startswith('https://')) else None
-        buttons = []
-        if valid_spotify_url:
-            buttons.append([Button.url("🎵 Listen on Spotify", valid_spotify_url)])
-        # No download button as per request
+        buttons = []  # No buttons as per request to avoid errors
         sent_message = await event.respond(album_message, buttons=buttons)
         if cover:
             await sent_message.reply(file=cover)
@@ -354,13 +349,8 @@ class Song:
 📝 Tracks: `{len(tracks)}`
 📅 Release Date: `{first_song.release_date if tracks else "N/A"}`  # Use release date from first track as proxy
 [IMAGE]({playlist_cover_url or ""})
-{playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else ""}
         '''
-        valid_spotify_url = playlist.external_urls['spotify'] if (hasattr(playlist, 'external_urls') and playlist.external_urls['spotify'].startswith('https://')) else None
-        buttons = []
-        if valid_spotify_url:
-            buttons.append([Button.url("🎵 Listen on Spotify", valid_spotify_url)])
-        # No download button as per request
+        buttons = []  # No buttons as per request to avoid errors
         sent_message = await event.respond(playlist_message, buttons=buttons)
         if cover:
             await sent_message.reply(file=cover)
