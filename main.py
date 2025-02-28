@@ -1,12 +1,13 @@
 from telegram import BOT_TOKEN, CLIENT
 from telethon import events
+from telethon.tl.custom import Button  # Added to fix Button NameError
 from models import session, Subscription, User
 from decouple import config
 import datetime
 import pytz
 from sqlalchemy.exc import SQLAlchemyError
 import re  # Added for URL parsing
-import time  # Added to fix NameError
+import time  # Ensured to be present
 from consts import PROCESSING  # Already added
 from spotify.song import Song  # Already added
 
@@ -43,7 +44,7 @@ async def start(event):
 @CLIENT.on(events.NewMessage(pattern=r'/search (.+)'))
 async def search(event):
     query = event.pattern_match.group(1)
-    from spotify import search_single  # Should work with spotify.py in spotify directory after __init__.py update
+    from spotify import search_single
     songs = search_single(query)
     if songs:
         message = "Search Results:\n"
