@@ -34,7 +34,7 @@ async def check_subscription(user_id):
 async def start(event):
     user_id = event.sender_id
     if await check_subscription(user_id):
-        await event.respond("Welcome back! Your subscription is active. Use /search <song_name> or send a Spotify link to download.")
+        await event.respond("Welcome back! Your subscription is active. Send a Spotify link to download.")
     else:
         await event.respond("Welcome! Use /subscribe to get access or /search <song_name> to try without subscription.")
 
