@@ -18,6 +18,8 @@ from telegram import DB_CHANNEL_ID, CLIENT, BOT_ID
 
 if not os.path.exists('covers'):
     os.makedirs('covers')
+if not os.path.exists('songs'):
+    os.makedirs('songs')
 
 
 class Song:
@@ -236,8 +238,36 @@ class Song:
         album = Album(album_id)
         processing = await event.respond(PROCESSING)
 
+        # Get cover photo and metadata from the first track
+        if album.track_list:
+            first_track_id = album.track_list[0]
+            first_song = Song(f"https://open.spotify.com/track/{first_track_id}")
+            album_cover_url = first_song.album_cover
+            album_name = first_song.album_name
+            response = requests.get(album_cover_url)
+            cover_file = f'covers/album_{album_id}.png'
+            with open(cover_file, 'wb') as f:
+                f.write(response.content)
+            cover = await CLIENT.upload_file(cover_file)
+            album_message = f'''
+💿 Album: `{album_name}`
+📝 Tracks: `{len(album.track_list)}`
+📅 Release Date: `{first_song.release_date}`
+[IMAGE]({album_cover_url})
+            '''
+        else:
+            cover = None
+            album_message = "No tracks available in this album."
+
+        # Send album summary with cover photo
+        sent_message = await event.respond(album_message)
+        if cover:
+            await sent_message.reply(file=cover)
+
+        # Download and upload tracks automatically
         for track_id in album.track_list:
             await Song.upload_on_telegram(event, track_id)  # Reuse track upload logic
+
         await processing.delete()
 
     @staticmethod
@@ -247,7 +277,35 @@ class Song:
         tracks = playlist.get_playlist_tracks(playlist_id)
         processing = await event.respond(PROCESSING)
 
+        # Get cover photo and metadata from the first track
+        if tracks:
+            first_track_id = tracks[0]['track']['id']
+            first_song = Song(f"https://open.spotify.com/track/{first_track_id}")
+            playlist_cover_url = first_song.album_cover
+            playlist_name = tracks[0]['track']['album']['name']
+            response = requests.get(playlist_cover_url)
+            cover_file = f'covers/playlist_{playlist_id}.png'
+            with open(cover_file, 'wb') as f:
+                f.write(response.content)
+            cover = await CLIENT.upload_file(cover_file)
+            playlist_message = f'''
+🎧 Playlist: `{playlist_name}`
+📝 Tracks: `{len(tracks)}`
+📅 Release Date: `{first_song.release_date}`
+[IMAGE]({playlist_cover_url})
+            '''
+        else:
+            cover = None
+            playlist_message = "No tracks available in this playlist."
+
+        # Send playlist summary with cover photo
+        sent_message = await event.respond(playlist_message)
+        if cover:
+            await sent_message.reply(file=cover)
+
+        # Download and upload tracks automatically
         for item in tracks:
             track_id = item['track']['id']
             await Song.upload_on_telegram(event, track_id)  # Reuse track upload logic
+
         await processing.delete()
