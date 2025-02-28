@@ -18,6 +18,8 @@ from telegram import DB_CHANNEL_ID, CLIENT, BOT_ID
 
 if not os.path.exists('covers'):
     os.makedirs('covers')
+if not os.path.exists('songs'):
+    os.makedirs('songs')
 
 
 class Song:
@@ -195,38 +197,53 @@ class Song:
         song_db = session.query(SongRequest).filter_by(spotify_id=song_id).first()
         if song_db:
             message_id = song_db.song_id_in_group
-        else:
-            song = Song(song_id)
-            # Remove NOT_IN_DB message
-            await processing.edit(DOWNLOADING)
-            yt_link = song.yt_link()
-            if yt_link is None:
-                print(f'[YOUTUBE] song not found: {song.uri}')
-                await processing.delete()
-                await event.respond(f"{song.track_name}\n{SONG_NOT_FOUND}")
-                return
-            file_path = song.download(yt_link=yt_link)
-            await processing.edit(UPLOADING)
-
-            upload_file = await CLIENT.upload_file(file_path)
-            new_message = await CLIENT.send_file(
-                DB_CHANNEL_ID,
-                caption=BOT_ID,
-                file=upload_file,
-                supports_streaming=True,
-                attributes=(
-                    types.DocumentAttributeAudio(title=song.track_name, duration=song.duration_to_seconds,
-                                                performer=song.artist_name),),
-                progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
+            await CLIENT.forward_messages(
+                entity=event.chat_id,
+                messages=message_id,
+                from_peer=PeerUser(int(DB_CHANNEL_ID))
             )
-            song.save_db(event.sender_id, new_message.id)
-            message_id = new_message.id
+            await processing.delete()
+            return
 
-        # Forward the message
-        await CLIENT.forward_messages(
+        song = Song(f"https://open.spotify.com/track/{song_id}")
+        await processing.edit(DOWNLOADING)
+        yt_link = song.yt_link()
+        if yt_link is None:
+            print(f'[YOUTUBE] song not found: {song.uri}')
+            await processing.delete()
+            await event.respond(f"{song.track_name}\n{SONG_NOT_FOUND}")
+            return
+        file_path = song.download(yt_link=yt_link)
+        await processing.edit(UPLOADING)
+
+        upload_file = await CLIENT.upload_file(file_path)
+        new_message = await CLIENT.send_file(
+            DB_CHANNEL_ID,
+            file=upload_file,
+            caption=await song.song_telethon_template()[0],  # Use template for caption
+            supports_streaming=True,
+            attributes=(
+                types.DocumentAttributeAudio(
+                    title=song.track_name,
+                    duration=song.duration_to_seconds,
+                    performer=song.artist_name
+                ),
+            ),
+            progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
+        )
+        song.save_db(event.sender_id, new_message.id)
+        message_id = new_message.id
+
+        # Forward with template message and buttons
+        forwarded_message = await CLIENT.forward_messages(
             entity=event.chat_id,
             messages=message_id,
             from_peer=PeerUser(int(DB_CHANNEL_ID))
+        )
+        await forwarded_message.reply(
+            await song.song_telethon_template()[0],  # Message
+            file=await CLIENT.upload_file(await song.download_song_cover()),  # Cover image
+            buttons=await song.song_telethon_template()[2]  # Buttons
         )
         await processing.delete()
 
@@ -236,8 +253,55 @@ class Song:
         album = Album(album_id)
         processing = await event.respond(PROCESSING)
 
-        for track_id in album.track_list:
-            await Song.upload_on_telegram(event, track_id)  # Reuse track upload logic
+        # Send album cover and metadata first
+        album_cover_url = album.images[0]['url'] if album.images else None
+        if album_cover_url:
+            response = requests.get(album_cover_url)
+            cover_file = f'covers/album_{album_id}.png'
+            with open(cover_file, 'wb') as f:
+                f.write(response.content)
+            cover = await CLIENT.upload_file(cover_file)
+
+        album_message = f'''
+💿 Album: `{album.name}`
+📝 Tracks: `{len(album.track_list)}`
+📅 Release Date: `{album.release_date[:4] if album.release_date else "N/A"}`
+[IMAGE]({album_cover_url or ""})
+{album.external_urls['spotify']}
+        '''
+        await event.respond(album_message, file=cover if album_cover_url else None, buttons=[
+            [Button.url("🎵 Listen on Spotify", album.external_urls['spotify'])],
+            [Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")]
+        ])
+
+        # Download and upload tracks
+        for index, track_id in enumerate(album.track_list):
+            song = Song(f"https://open.spotify.com/track/{track_id}")
+            await processing.edit(f"Downloading track {index + 1}/{len(album.track_list)}")
+            yt_link = song.yt_link()
+            if yt_link is None:
+                print(f'[YOUTUBE] song not found: {song.uri}')
+                continue
+            file_path = song.download(yt_link=yt_link)
+            await processing.edit(f"Uploading track {index + 1}/{len(album.track_list)}")
+
+            upload_file = await CLIENT.upload_file(file_path)
+            new_message = await CLIENT.send_file(
+                DB_CHANNEL_ID,
+                file=upload_file,
+                caption=await song.song_telethon_template()[0],
+                supports_streaming=True,
+                attributes=(
+                    types.DocumentAttributeAudio(
+                        title=song.track_name,
+                        duration=song.duration_to_seconds,
+                        performer=song.artist_name
+                    ),
+                ),
+                progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
+            )
+            song.save_db(event.sender_id, new_message.id)
+
         await processing.delete()
 
     @staticmethod
@@ -247,7 +311,54 @@ class Song:
         tracks = playlist.get_playlist_tracks(playlist_id)
         processing = await event.respond(PROCESSING)
 
-        for item in tracks:
+        # Send playlist cover and metadata first
+        playlist_cover_url = playlist.images[0]['url'] if playlist.images else None
+        if playlist_cover_url:
+            response = requests.get(playlist_cover_url)
+            cover_file = f'covers/playlist_{playlist_id}.png'
+            with open(cover_file, 'wb') as f:
+                f.write(response.content)
+            cover = await CLIENT.upload_file(cover_file)
+
+        playlist_message = f'''
+🎧 Playlist: `{playlist.name}`
+📝 Tracks: `{len(tracks)}`
+📅 Created: `{playlist.created_at[:10] if playlist.created_at else "N/A"}`
+[IMAGE]({playlist_cover_url or ""})
+{playlist.external_urls['spotify']}
+        '''
+        await event.respond(playlist_message, file=cover if playlist_cover_url else None, buttons=[
+            [Button.url("🎵 Listen on Spotify", playlist.external_urls['spotify'])],
+            [Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")]
+        ])
+
+        # Download and upload tracks
+        for index, item in enumerate(tracks):
             track_id = item['track']['id']
-            await Song.upload_on_telegram(event, track_id)  # Reuse track upload logic
+            song = Song(f"https://open.spotify.com/track/{track_id}")
+            await processing.edit(f"Downloading track {index + 1}/{len(tracks)}")
+            yt_link = song.yt_link()
+            if yt_link is None:
+                print(f'[YOUTUBE] song not found: {song.uri}')
+                continue
+            file_path = song.download(yt_link=yt_link)
+            await processing.edit(f"Uploading track {index + 1}/{len(tracks)}")
+
+            upload_file = await CLIENT.upload_file(file_path)
+            new_message = await CLIENT.send_file(
+                DB_CHANNEL_ID,
+                file=upload_file,
+                caption=await song.song_telethon_template()[0],
+                supports_streaming=True,
+                attributes=(
+                    types.DocumentAttributeAudio(
+                        title=song.track_name,
+                        duration=song.duration_to_seconds,
+                        performer=song.artist_name
+                    ),
+                ),
+                progress_callback=lambda sent, total: Song.progress_callback(processing, sent, total)
+            )
+            song.save_db(event.sender_id, new_message.id)
+
         await processing.delete()
