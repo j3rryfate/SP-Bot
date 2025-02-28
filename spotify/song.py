@@ -268,7 +268,7 @@ class Song:
             cover = None
             album_name = "Unknown Album"
 
-        # Send album summary with cover (separate message and file)
+        # Send album summary with buttons (no file in initial message)
         album_message = f'''
 💿 Album: `{album_name}`
 📝 Tracks: `{len(album.track_list)}`
@@ -276,10 +276,12 @@ class Song:
 [IMAGE]({album_cover_url or ""})
 {album.external_urls['spotify'] if hasattr(album, 'external_urls') else ""}
         '''
-        sent_message = await event.respond(album_message, buttons=[
-            [Button.url("🎵 Listen on Spotify", album.external_urls['spotify'] if hasattr(album, 'external_urls') else "")],
-            [Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")]
-        ])
+        valid_spotify_url = album.external_urls['spotify'] if (hasattr(album, 'external_urls') and album.external_urls['spotify'].startswith('https://')) else None
+        buttons = []
+        if valid_spotify_url:
+            buttons.append([Button.url("🎵 Listen on Spotify", valid_spotify_url)])
+        buttons.append([Button.inline("📩 Download All Tracks", data=f"download_album_all:{album_id}")])
+        sent_message = await event.respond(album_message, buttons=buttons)
         if cover:
             await sent_message.reply(file=cover)
 
@@ -336,7 +338,7 @@ class Song:
             cover = None
             playlist_name = "Unknown Playlist"
 
-        # Send playlist summary with cover (separate message and file)
+        # Send playlist summary with buttons (no file in initial message)
         playlist_message = f'''
 🎧 Playlist: `{playlist_name}`
 📝 Tracks: `{len(tracks)}`
@@ -344,10 +346,12 @@ class Song:
 [IMAGE]({playlist_cover_url or ""})
 {playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else ""}
         '''
-        sent_message = await event.respond(playlist_message, buttons=[
-            [Button.url("🎵 Listen on Spotify", playlist.external_urls['spotify'] if hasattr(playlist, 'external_urls') else "")],
-            [Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")]
-        ])
+        valid_spotify_url = playlist.external_urls['spotify'] if (hasattr(playlist, 'external_urls') and playlist.external_urls['spotify'].startswith('https://')) else None
+        buttons = []
+        if valid_spotify_url:
+            buttons.append([Button.url("🎵 Listen on Spotify", valid_spotify_url)])
+        buttons.append([Button.inline("📩 Download All Tracks", data=f"download_playlist_all:{playlist_id}")])
+        sent_message = await event.respond(playlist_message, buttons=buttons)
         if cover:
             await sent_message.reply(file=cover)
 
