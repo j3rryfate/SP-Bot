@@ -1,14 +1,25 @@
 from telegram import BOT_TOKEN, CLIENT
 from telethon import events
 from telethon.tl.custom import Button  # Added to fix Button NameError
-from models import session, Subscription, User
+from models import session, Subscription, User, Base  # Import Base for table creation
 from decouple import config
 import datetime
 import pytz
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import SQLAlchemyError
 import re  # Added for URL parsing
 
 ADMIN_ID = int(config('ADMIN_ID'))
+
+# Database configuration using DATABASE_URL from Railway
+DATABASE_URL = config('DATABASE_URL', default='sqlite:///sp_bot.db')  # Fallback to SQLite if not provided
+engine = create_engine(DATABASE_URL)
+Session = sessionmaker(bind=engine)
+session = Session()
+
+# Create tables if they don't exist
+Base.metadata.create_all(engine)
 
 async def check_subscription(user_id):
     try:
@@ -34,9 +45,9 @@ async def check_subscription(user_id):
 async def start(event):
     user_id = event.sender_id
     if await check_subscription(user_id):
-        await event.respond("Welcome back! Your subscription is active. Send a Spotify link to download.")
+        await event.respond("Welcome back! Your subscription is active.")
     else:
-        await event.respond("Welcome! Use /subscribe to get access or /search <song_name> to try without subscription.")
+        await event.respond("Welcome! Use /subscribe to get access.")
 
 @CLIENT.on(events.NewMessage(pattern=r'/search (.+)'))
 async def search(event):
